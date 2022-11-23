@@ -1,0 +1,112 @@
+const fs = require('fs');
+const axios = require('axios');
+const axiosRetry = require('axios-retry');
+const async = require('async-q');
+
+process.env.DEBUG = 'axios';
+require('axios-debug-log');
+axiosRetry(axios, { retries: 10 });
+
+const DB_FILE = 'db.json'
+const DB_FILE_TMP = 'db.json.tmp'
+
+let db = {}
+
+function processSeed(obj) {
+    let added = 0;
+    obj.items.forEach(item => {
+        const { href, time, size, managed, fetched } = item;
+        const entry = db[href];
+        if (entry === undefined || time !== entry.time || size !== entry.size) {
+            db[href] = {
+                time,
+                size,
+                managed,
+                fetched,
+            };
+            added++;
+        }
+    });
+    console.log(`processSeed: added ${added} entries`);
+}
+
+async function processQueue() {
+    const queue = [];
+    for (const [href, entry] of Object.entries(db)) {
+        if (entry.fetched === false) {
+            queue.push(href);
+        }
+    }
+    console.log(`processQueue: queued ${queue.length} items`);
+
+    tasks = queue.map((href, i) => (async () => {
+        console.log(`Item ${++i} / ${queue.length}`);
+        try {
+            await processItem(i, href);
+        } catch (err) {
+            console.error(err);
+        }
+    }));
+
+    await async.parallelLimit(tasks, 25, (err, result) => {
+        if (err) console.error('processQueue: error: ', err)
+        else console.log('processQueue: done');
+    });
+
+    return queue.length;
+}
+
+async function processItem(i, href) {
+    console.log(`processItem ${i}: ${href}`);
+    const response = await axios.post(
+        'https://www.tgbak.com/?',
+        {
+            action: 'get',
+            items: { href, what: 2 }
+        }
+    );
+    const seed = response.data;
+    processSeed(seed);
+    db[href].fetched = true;
+    if (i % 11 === 0) {
+        saveDb();
+    }
+}
+
+function saveDb() {
+    const dbjson = JSON.stringify(db, null, 2);
+    fs.writeFileSync(DB_FILE_TMP, dbjson);
+    fs.renameSync(DB_FILE_TMP, DB_FILE);
+    console.log(`saveDb: ${dbjson.length} bytes`);
+}
+
+function exportDb() {
+    const f = fs.createWriteStream('files.txt', { flags: 'w' });
+    for (const [href, _] of Object.entries(db)) {
+        f.write(`https://www.tgbak.com${href}\n`);
+    }
+    f.close();
+}
+
+async function main() {
+    db = JSON.parse(fs.readFileSync(DB_FILE));
+    console.log(`main: Loaded ${Object.keys(db).length} db entries`);
+
+    const seed = JSON.parse(fs.readFileSync('seed.json'));
+    processSeed(seed);
+    while (await processQueue() > 0) {
+        saveDb();
+    };
+
+    saveDb();
+    exportDb();
+    return "Exit ok";
+}
+
+main()
+    .then(result => {
+        console.log(result);
+    })
+    .catch(err => {
+        console.error(err);
+    });
