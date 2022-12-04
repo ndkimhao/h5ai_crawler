@@ -97,6 +97,8 @@ function statDb() {
         if (entry.fetched === undefined) {
             numFiles++;
             totalSize += entry.size;
+        } else if (href.split('/').length === 3) {
+            console.log(`Folder (${Math.round(entry.size / 1073741824)} GB): ${href}`);
         }
     }
     console.log(`statDb: ${numFiles} files, ${totalSize} bytes`);
@@ -108,13 +110,17 @@ async function main() {
 
     const seed = JSON.parse(fs.readFileSync('seed.json'));
     processSeed(seed);
+    let updated = false;
     while (await processQueue() > 0) {
         saveDb();
+        updated = true;
     };
 
-    // saveDb();
-    // exportDb();
-    statDb();
+    if (updated) {
+        saveDb();
+        exportDb();
+        //statDb();
+    }
     return "Exit ok";
 }
 

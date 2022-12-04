@@ -1,5 +1,6 @@
 db.json
 db_backup.json
 files.txt
+files_backup.txt
 seed.json
 node_modules/
